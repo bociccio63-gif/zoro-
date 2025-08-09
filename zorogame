@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Zoro Game</title>
+<style>
+  body {
+    margin: 0;
+    background: black;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    background: #222;
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="400"></canvas>
+
+<script>
+// =======================
+// CONFIGURAZIONE GIOCO
+// =======================
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const GRAVITY = 0.8;
+const PLAYER_SPEED = 4;
+const JUMP_FORCE = 12;
+const ENEMY_SPEED = 2;
+const LEVELS = 3;
+
+let player = {
+  x: 100,
+  y: 300,
+  width: 40,
+  height: 60,
+  velX: 0,
+  velY: 0,
+  onGround: false,
+  health: 100,
+  firePower: false,
+  fireTimer: 0
+};
+
+let enemies = [];
+let blocks = [];
+let bonuses = [];
+let fireballs = [];
+
+let level = 0;
+let score = 0;
+let fireworks = [];
+let fireworksTimer = 0;
+let fireworksActive = false;
+let gameOver = false;
+
+let keys = {};
+
+// =======================
+// OGGETTI LIVELLO
+// =======================
+function createLevel(lvl) {
+  enemies = [];
+  blocks = [];
+  bonuses = [];
+
+  // Nemici
+  for (let i = 0; i < 5 + lvl * 2; i++) {
+    enemies.push({
+      x: 400 + i * 200,
+      y: 340,
+      width: 40,
+      height: 60,
+      dir: Math.random() < 0.5 ? -1 : 1,
+      alive: true
+    });
+  }
+
+  // Blocchi bonus sospesi
+  for (let i = 0; i < 6 + lvl * 2; i++) {
+    blocks.push({
+      x: 300 + i * 150,
+      y: 200,
+      width: 40,
+      height: 40,
+      bonus: Math.random() < 0.5 ? "life" : "fire",
+      active: true
+    });
+  }
+}
+
+// =======================
+// GESTIONE INPUT
+// =======================
+document.addEventListener("keydown", e => {
+  keys[e.code] = true;
+  if (e.code === "KeyZ" && player.firePower) {
+    shootFireball();
+  }
+});
+document.addEventListener("keyup", e => keys[e.code] = false);
+
+// =======================
+// FUNZIONI DI GIOCO
+// =======================
+function shootFireball() {
+  fireballs.push({
+    x: player.x + player.width / 2,
+    y: player.y + player.height / 2,
+    velX: 6 * (player.velX >= 0 ? 1 : -1)
+  });
+}
+
+function updatePlayer() {
+  // Movimento orizzontale
+  if (keys["ArrowRight"]) {
+    player.velX = PLAYER_SPEED;
+  } else if (keys["ArrowLeft"]) {
+    player.velX = -PLAYER_SPEED;
+  } else {
+    player.velX = 0;
+  }
+
+  // Salto
+  if (keys["Space"] && player.onGround) {
+    player.velY = -JUMP_FORCE;
+    player.onGround = false;
+  }
+
+  // Gravità
+  player.velY += GRAVITY;
+  player.x += player.velX;
+  player.y += player.velY;
+
+  // Limiti terreno
+  if (player.y + player.height >= 400) {
+    player.y = 400 - player.height;
+    player.velY = 0;
+    player.onGround = true;
+  }
+
+  // Timer fuoco
+  if (player.firePower) {
+    player.fireTimer--;
+    if (player.fireTimer <= 0) {
+      player.firePower = false;
+    }
+  }
+}
+
+function updateEnemies() {
+  enemies.forEach(enemy => {
+    if (enemy.alive) {
+      enemy.x += enemy.dir * ENEMY_SPEED;
+      if (enemy.x < 0 || enemy.x > 760) {
+        enemy.dir *= -1;
+      }
+    }
+  });
+}
+
+function updateFireballs() {
+  fireballs.forEach(f => f.x += f.velX);
+}
+
+function checkCollisions() {
+  // Collisione con nemici
+  enemies.forEach(enemy => {
+    if (enemy.alive && collision(player, enemy)) {
+      if (player.velY > 0) {
+        enemy.alive = false;
+        player.velY = -8;
+        score += 100;
+      } else {
+        player.health -= 20;
+        if (player.health <= 0) {
+          gameOver = true;
+        }
+      }
+    }
+  });
+
+  // Collisione con blocchi bonus
+  blocks.forEach(block => {
+    if (block.active &&
+        player.y < block.y &&
+        player.y + player.height > block.y &&
+        player.x + player.width > block.x &&
+        player.x < block.x + block.width &&
+        player.velY < 0) {
+      block.active = false;
+      spawnBonus(block);
+    }
+  });
+
+  // Collisione palle di fuoco con nemici
+  fireballs.forEach(f => {
+    enemies.forEach(enemy => {
+      if (enemy.alive && collision(f, enemy)) {
+        enemy.alive = false;
+        score += 100;
+      }
+    });
+  });
+}
+
+function spawnBonus(block) {
+  if (block.bonus === "life") {
+    player.health = Math.min(100, player.health + 20);
+  } else if (block.bonus === "fire") {
+    player.firePower = true;
+    player.fireTimer = 1800; // 30s a 60fps
+  }
+}
+
+function collision(a, b) {
+  return a.x < b.x + b.width &&
+         a.x + a.width > b.x &&
+         a.y < b.y + b.height &&
+         a.y + a.height > b.y;
+}
+
+function checkLevelComplete() {
+  if (enemies.every(e => !e.alive)) {
+    fireworksActive = true;
+    fireworksTimer = 300; // 5 secondi
+    if (level < LEVELS - 1) {
+      level++;
+      createLevel(level);
+    } else {
+      gameOver = true;
+    }
+  }
+}
+
+function updateFireworksState() {
+  if (fireworksActive) {
+    fireworksTimer--;
+    if (fireworksTimer % 10 === 0) {
+      fireworks.push({ x: Math.random() * 800, y: Math.random() * 200, radius: 2 });
+    }
+    if (fireworksTimer <= 0) {
+      fireworksActive = false;
+    }
+  }
+}
+
+function drawBackground() {
+  ctx.fillStyle = "#333";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawPlayer() {
+  ctx.fillStyle = player.firePower ? "orange" : "white";
+  ctx.fillRect(player.x, player.y, player.width, player.height);
+}
+
+function drawEnemies() {
+  ctx.fillStyle = "red";
+  enemies.forEach(enemy => {
+    if (enemy.alive) {
+      ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+    }
+  });
+}
+
+function drawBlocks() {
+  ctx.fillStyle = "yellow";
+  blocks.forEach(block => {
+    if (block.active) {
+      ctx.fillRect(block.x, block.y, block.width, block.height);
+    }
+  });
+}
+
+function drawFireballs() {
+  ctx.fillStyle = "orange";
+  fireballs.forEach(f => ctx.fillRect(f.x, f.y, 10, 10));
+}
+
+function drawHealthBar() {
+  ctx.fillStyle = "green";
+  ctx.fillRect(650, 20, player.health * 1.5, 20);
+  ctx.strokeStyle = "white";
+  ctx.strokeRect(650, 20, 150, 20);
+}
+
+function drawScore() {
+  ctx.fillStyle = "white";
+  ctx.fillText("Score: " + score, 20, 20);
+}
+
+function drawFireworks() {
+  fireworks.forEach(f => {
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+    ctx.fillStyle = "cyan";
+    ctx.fill();
+  });
+}
+
+function drawGameOverMessage() {
+  ctx.fillStyle = "white";
+  ctx.font = "30px Arial";
+  ctx.fillText("Hai perso, sei solo un rapperino", 150, 200);
+}
+
+function updateGameOver() {
+  if (gameOver && player.health <= 0) {
+    // Riavvio dopo 5s
+    setTimeout(() => {
+      level = 0;
+      player.health = 100;
+      score = 0;
+      gameOver = false;
+      createLevel(level);
+    }, 5000);
+  }
+}
+
+// =======================
+// LOOP DI GIOCO
+// =======================
+function loop() {
+  updatePlayer();
+  updateEnemies();
+  updateFireballs();
+  checkCollisions();
+  checkLevelComplete();
+  updateFireworksState();
+  updateGameOver();
+
+  drawBackground();
+  drawBlocks();
+  drawPlayer();
+  drawEnemies();
+  drawFireballs();
+  drawHealthBar();
+  drawScore();
+  drawFireworks();
+
+  if (gameOver && player.health <= 0) {
+    drawGameOverMessage();
+  }
+
+  requestAnimationFrame(loop);
+}
+
+createLevel(0);
+loop();
+</script>
+</body>
+</html>
